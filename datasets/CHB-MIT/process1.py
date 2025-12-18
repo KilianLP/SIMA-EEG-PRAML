@@ -231,8 +231,8 @@ def start_process(pacient, num, start, end, sum_ind):
 
 
 # PARAMETERS
-signals_path = "/srv/local/data/physionet.org/files/chbmit/1.0.0"  # Path to the data main directory
-clean_path = "/srv/local/data/physionet.org/files/chbmit/1.0.0/clean_signals"  # Path where to store clean data
+signals_path = "/Brain/private/DT_Reve_raw/CHBMIT/physionet.org/files/chbmit/1.0.0"  # Path to the data main directory
+clean_path = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_signals"  # Path where to store clean data
 
 if not os.path.exists(clean_path):
     os.makedirs(clean_path)

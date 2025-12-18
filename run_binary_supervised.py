@@ -178,7 +178,7 @@ def prepare_CHB_MIT_dataloader(args):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
 
-    root = "/srv/local/data/physionet.org/files/chbmit/1.0.0/clean_segments"
+    root = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_segments"
 
     train_files = os.listdir(os.path.join(root, "train"))
     val_files = os.listdir(os.path.join(root, "val"))
@@ -261,8 +261,8 @@ def prepare_PTB_dataloader(args):
 
 def supervised(args):
     # get data loaders
-    if args.dataset == "TUAB":
-        train_loader, test_loader, val_loader = prepare_TUAB_dataloader(args)
+    if args.dataset == "CHB_MIT":
+        train_loader, test_loader, val_loader = prepare_CHB_MIT_dataloader(args)
 
     else:
         raise NotImplementedError
@@ -349,10 +349,9 @@ def supervised(args):
     )
 
     trainer = pl.Trainer(
-        devices=[0],
+        devices="auto",
         accelerator="gpu",
         strategy=DDPStrategy(find_unused_parameters=False),
-        auto_select_gpus=True,
         benchmark=True,
         enable_checkpointing=True,
         logger=logger,
@@ -374,7 +373,7 @@ def supervised(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=100,
+    parser.add_argument("--epochs", type=int, default=20,
                         help="number of epochs")
     parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
     parser.add_argument("--weight_decay", type=float,
@@ -382,13 +381,13 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int,
                         default=512, help="batch size")
     parser.add_argument("--num_workers", type=int,
-                        default=32, help="number of workers")
-    parser.add_argument("--dataset", type=str, default="TUAB", help="dataset")
+                        default=2, help="number of workers")
+    parser.add_argument("--dataset", type=str, default="CHB_MIT", help="dataset")
     parser.add_argument(
-        "--model", type=str, default="SPaRCNet", help="which supervised model to use"
+        "--model", type=str, default="CNNTransformer", help="which supervised model to use"
     )
     parser.add_argument(
-        "--in_channels", type=int, default=16, help="number of input channels"
+        "--in_channels", type=int, default=23, help="number of input channels"
     )
     parser.add_argument(
         "--sample_length", type=float, default=10, help="length (s) of sample"
@@ -397,7 +396,7 @@ if __name__ == "__main__":
         "--n_classes", type=int, default=1, help="number of output classes"
     )
     parser.add_argument(
-        "--sampling_rate", type=int, default=200, help="sampling rate (r)"
+        "--sampling_rate", type=int, default=200, help="sampling rate (Hz)"
     )
     parser.add_argument("--token_size", type=int,
                         default=200, help="token size (t)")

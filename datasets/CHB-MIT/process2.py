@@ -4,8 +4,8 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing as mp
 
-root = "/srv/local/data/physionet.org/files/chbmit/1.0.0/clean_signals"
-out = "/srv/local/data/physionet.org/files/chbmit/1.0.0/clean_segments"
+root = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_signals"
+out = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_segments"
 
 # root = 'clean_signals'
 # out = 'clean_segments'
