@@ -1,0 +1,615 @@
+import os
+import argparse
+import torch
+import numpy as np
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint
+
+from model import CNNTransformer
+from utils import CHBMITLoader, BCE
+from pyhealth.metrics import binary_metrics_fn
+
+
+class LitModel_finetune(pl.LightningModule):
+    def __init__(self, args, model):
+        super().__init__()
+        self.model = model
+        self.threshold = 0.5
+        self.args = args
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
+
+    def training_step(self, batch, batch_idx):
+        X, y = batch
+        prob = self.model(X)
+        loss = BCE(prob, y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        X, y = batch
+        with torch.no_grad():
+            prob = self.model(X)
+            val_loss = BCE(prob, y)
+            step_result = torch.sigmoid(prob).cpu().numpy()
+            step_gt = y.cpu().numpy()
+        self.validation_step_outputs.append((step_result, step_gt))
+        self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        return step_result, step_gt
+
+    def on_validation_epoch_end(self):
+        # Reconstruct raw predictions and ground truth
+        all_predictions_prob = []
+        all_gt = []
+        for out in self.validation_step_outputs:
+            all_predictions_prob.extend(out[0])
+            all_gt.extend(out[1])
+        
+        result_array = np.array(all_predictions_prob)
+        gt = np.array(all_gt)
+
+        if sum(gt) * (len(gt) - sum(gt)) != 0:
+            self.threshold = float(np.sort(result_array)[-int(np.sum(gt))])
+            result = binary_metrics_fn(
+                gt,
+                result_array,
+                metrics=["pr_auc", "roc_auc", "accuracy", "balanced_accuracy"],
+                threshold=self.threshold,
+            )
+        else:
+            result = {
+                "accuracy": 0.0,
+                "balanced_accuracy": 0.0,
+                "pr_auc": 0.0,
+                "roc_auc": 0.0,
+            }
+        
+        # Calculate false positives and FP rate per hour
+        predictions = (result_array >= self.threshold).astype(int)
+        false_positives = np.sum((predictions == 1) & (gt == 0))
+        total_samples = len(gt)
+        # Each sample is 10 seconds, so total hours = (total_samples * 10) / 3600
+        total_hours = (total_samples * self.args.sample_length) / 3600.0
+        fp_per_hour = false_positives / total_hours if total_hours > 0 else 0.0
+        
+        self.log("val_acc", result["accuracy"], sync_dist=True)
+        self.log("val_bacc", result["balanced_accuracy"], sync_dist=True)
+        self.log("val_pr_auc", result["pr_auc"], sync_dist=True)
+        self.log("val_auroc", result["roc_auc"], sync_dist=True)
+        self.log("val_false_positives", float(false_positives), sync_dist=True)
+        self.log("val_fp_per_hour", fp_per_hour, sync_dist=True)
+        
+        print(f"Validation - Accuracy: {result['accuracy']:.4f}, AUROC: {result['roc_auc']:.4f}, "
+              f"FP: {false_positives}, FP/hour: {fp_per_hour:.2f}, Threshold: {self.threshold:.4f}")
+        self.validation_step_outputs.clear()
+
+    def test_step(self, batch, batch_idx):
+        X, y = batch
+        with torch.no_grad():
+            convScore = self.model(X)
+            step_result = torch.sigmoid(convScore).cpu().numpy()
+            step_gt = y.cpu().numpy()
+        self.test_step_outputs.append((step_result, step_gt))
+        return step_result, step_gt
+
+    def on_test_epoch_end(self):
+        # Reconstruct raw predictions and ground truth
+        all_predictions_prob = []
+        all_gt = []
+        for out in self.test_step_outputs:
+            all_predictions_prob.extend(out[0])
+            all_gt.extend(out[1])
+        
+        result_array = np.array(all_predictions_prob)
+        gt = np.array(all_gt)
+        
+        if sum(gt) * (len(gt) - sum(gt)) != 0:
+            result = binary_metrics_fn(
+                gt,
+                result_array,
+                metrics=["pr_auc", "roc_auc", "accuracy", "balanced_accuracy"],
+                threshold=self.threshold,
+            )
+        else:
+            result = {
+                "accuracy": 0.0,
+                "balanced_accuracy": 0.0,
+                "pr_auc": 0.0,
+                "roc_auc": 0.0,
+            }
+        
+        # Calculate false positives and FP rate per hour
+        predictions = (result_array >= self.threshold).astype(int)
+        false_positives = np.sum((predictions == 1) & (gt == 0))
+        true_positives = np.sum((predictions == 1) & (gt == 1))
+        false_negatives = np.sum((predictions == 0) & (gt == 1))
+        true_negatives = np.sum((predictions == 0) & (gt == 0))
+        
+        total_samples = len(gt)
+        # Each sample is 10 seconds, so total hours = (total_samples * 10) / 3600
+        total_hours = (total_samples * self.args.sample_length) / 3600.0
+        fp_per_hour = false_positives / total_hours if total_hours > 0 else 0.0
+        
+        self.log("test_acc", result["accuracy"], sync_dist=True)
+        self.log("test_bacc", result["balanced_accuracy"], sync_dist=True)
+        self.log("test_pr_auc", result["pr_auc"], sync_dist=True)
+        self.log("test_auroc", result["roc_auc"], sync_dist=True)
+        self.log("test_false_positives", float(false_positives), sync_dist=True)
+        self.log("test_fp_per_hour", fp_per_hour, sync_dist=True)
+        
+        print(f"\n{'='*80}")
+        print(f"Test Results Summary:")
+        print(f"  Accuracy: {result['accuracy']:.4f}")
+        print(f"  Balanced Accuracy: {result['balanced_accuracy']:.4f}")
+        print(f"  PR AUC: {result['pr_auc']:.4f}")
+        print(f"  ROC AUC: {result['roc_auc']:.4f}")
+        print(f"  True Positives: {true_positives}")
+        print(f"  False Positives: {false_positives}")
+        print(f"  True Negatives: {true_negatives}")
+        print(f"  False Negatives: {false_negatives}")
+        print(f"  Total hours of data: {total_hours:.2f}")
+        print(f"  False Positives per hour: {fp_per_hour:.2f}")
+        print(f"{'='*80}\n")
+        
+        self.test_step_outputs.clear()
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=self.args.lr,
+            weight_decay=self.args.weight_decay,
+        )
+        return [optimizer]
+
+
+def filter_files_by_patient(files, min_patient=1, max_patient=8):
+    """Filter files to only include patients in range [min_patient, max_patient]"""
+    filtered_files = []
+    for f in files:
+        # Extract patient number from filename (e.g., chb01, chb02, etc.)
+        if f.startswith('chb'):
+            try:
+                patient_num = int(f[3:5])
+                if min_patient <= patient_num <= max_patient:
+                    filtered_files.append(f)
+            except ValueError:
+                continue
+    return filtered_files
+
+
+def prepare_CHB_MIT_8patients_dataloader(args):
+    # set random seed
+    seed = 12345
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+
+    root = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_segments"
+
+    print("\nData split strategy:")
+    print("  Attempting to use patients 1-5 for train, 6-8 for val/test")
+    
+    # Get all files from directories
+    all_train_dir_files = os.listdir(os.path.join(root, "train"))
+    all_val_dir_files = os.listdir(os.path.join(root, "val"))
+    all_test_dir_files = os.listdir(os.path.join(root, "test"))
+    
+    # Filter for patients 1-8 from all directories
+    train_dir_p15 = filter_files_by_patient(all_train_dir_files, min_patient=1, max_patient=5)
+    train_dir_p68 = filter_files_by_patient(all_train_dir_files, min_patient=6, max_patient=8)
+    val_dir_p15 = filter_files_by_patient(all_val_dir_files, min_patient=1, max_patient=5)
+    val_dir_p68 = filter_files_by_patient(all_val_dir_files, min_patient=6, max_patient=8)
+    test_dir_p15 = filter_files_by_patient(all_test_dir_files, min_patient=1, max_patient=5)
+    test_dir_p68 = filter_files_by_patient(all_test_dir_files, min_patient=6, max_patient=8)
+    
+    print(f"\nFiles found in directories:")
+    print(f"  train/ -> patients 1-5: {len(train_dir_p15)}, patients 6-8: {len(train_dir_p68)}")
+    print(f"  val/   -> patients 1-5: {len(val_dir_p15)}, patients 6-8: {len(val_dir_p68)}")
+    print(f"  test/  -> patients 1-5: {len(test_dir_p15)}, patients 6-8: {len(test_dir_p68)}")
+    
+    # Strategy: Use patients 6-8 for val/test if available, otherwise split patients 1-5
+    if len(val_dir_p68) > 0 or len(test_dir_p68) > 0 or len(train_dir_p68) > 0:
+        print("\n✓ Found data for patients 6-8, using them for validation/test")
+        train_files = train_dir_p15
+        # Combine all patient 6-8 data for validation and test
+        all_p68_files = train_dir_p68 + val_dir_p68 + test_dir_p68
+        np.random.shuffle(all_p68_files)
+        # Split 50-50 for val and test
+        mid = len(all_p68_files) // 2
+        val_files = all_p68_files[:mid]
+        test_files = all_p68_files[mid:]
+        
+        train_root = os.path.join(root, "train")
+        val_root = root  # Will need to handle mixed directories
+        test_root = root
+    else:
+        print("\n⚠️  No data for patients 6-8 found!")
+        print("   Using alternative strategy: Split patients 1-5 data")
+        print("   Train: 70%, Val: 15%, Test: 15%")
+        
+        # Combine all patient 1-5 files from all directories
+        all_p15_files = []
+        for f in train_dir_p15:
+            all_p15_files.append(('train', f))
+        for f in val_dir_p15:
+            all_p15_files.append(('val', f))
+        for f in test_dir_p15:
+            all_p15_files.append(('test', f))
+        
+        np.random.shuffle(all_p15_files)
+        
+        n_total = len(all_p15_files)
+        n_train = int(0.70 * n_total)
+        n_val = int(0.15 * n_total)
+        
+        train_items = all_p15_files[:n_train]
+        val_items = all_p15_files[n_train:n_train+n_val]
+        test_items = all_p15_files[n_train+n_val:]
+        
+        train_files = [(os.path.join(root, dir_name), fname) for dir_name, fname in train_items]
+        val_files = [(os.path.join(root, dir_name), fname) for dir_name, fname in val_items]
+        test_files = [(os.path.join(root, dir_name), fname) for dir_name, fname in test_items]
+
+    # Use only a fraction of the dataset if specified
+    if args.data_fraction < 1.0:
+        if isinstance(train_files[0], tuple):
+            # train_files contains (path, filename) tuples
+            np.random.shuffle(train_files)
+            np.random.shuffle(val_files)
+            np.random.shuffle(test_files)
+            train_files = train_files[:max(1, int(len(train_files) * args.data_fraction))]
+            val_files = val_files[:max(1, int(len(val_files) * args.data_fraction))]
+            test_files = test_files[:max(1, int(len(test_files) * args.data_fraction))]
+        else:
+            # train_files contains just filenames
+            np.random.shuffle(train_files)
+            np.random.shuffle(val_files)
+            np.random.shuffle(test_files)
+            train_files = train_files[:max(1, int(len(train_files) * args.data_fraction))]
+            val_files = val_files[:max(1, int(len(val_files) * args.data_fraction))]
+            test_files = test_files[:max(1, int(len(test_files) * args.data_fraction))]
+        
+        print(f"\n⚠️  Using {args.data_fraction*100:.1f}% of dataset for quick testing")
+
+    print(f"\nFinal dataset size:")
+    print(f"  Train: {len(train_files)} files")
+    print(f"  Val: {len(val_files)} files")
+    print(f"  Test: {len(test_files)} files")
+
+    # Create custom loader for mixed directory case
+    if isinstance(train_files[0], tuple):
+        # Files are (full_path, filename) tuples
+        train_loader = torch.utils.data.DataLoader(
+            CHBMITLoaderMixed(train_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=min(2, args.num_workers),  # Reduce workers to avoid corruption issues
+            persistent_workers=False,  # Don't persist to avoid keeping corrupted file handles
+        )
+        test_loader = torch.utils.data.DataLoader(
+            CHBMITLoaderMixed(test_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=min(2, args.num_workers),
+            persistent_workers=False,
+        )
+        val_loader = torch.utils.data.DataLoader(
+            CHBMITLoaderMixed(val_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=min(2, args.num_workers),
+            persistent_workers=False,
+        )
+    else:
+        # Standard case: all files in train directory
+        train_loader = torch.utils.data.DataLoader(
+            CHBMITLoader(os.path.join(root, "train"), train_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=min(2, args.num_workers),
+            persistent_workers=False,
+        )
+        test_loader = torch.utils.data.DataLoader(
+            CHBMITLoader(os.path.join(root, "train"), test_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=min(2, args.num_workers),
+            persistent_workers=False,
+        )
+        val_loader = torch.utils.data.DataLoader(
+            CHBMITLoader(os.path.join(root, "train"), val_files, args.sampling_rate),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=min(2, args.num_workers),
+            persistent_workers=False,
+        )
+    
+    print(f"Dataloader batches: Train={len(train_loader)}, Val={len(val_loader)}, Test={len(test_loader)}")
+    return train_loader, test_loader, val_loader
+
+
+class CHBMITLoaderMixed(torch.utils.data.Dataset):
+    """Custom loader for mixed directory files"""
+    def __init__(self, file_list, sampling_rate):
+        """
+        Args:
+            file_list: List of (full_path, filename) tuples
+            sampling_rate: Sampling rate for the data
+        """
+        self.file_list = file_list
+        self.sampling_rate = sampling_rate
+        self._validate_files()
+
+    def _validate_files(self):
+        """Remove corrupted files from the list"""
+        import pickle
+        valid_files = []
+        corrupted_count = 0
+        
+        print(f"Validating {len(self.file_list)} files...")
+        for full_path, filename in self.file_list:
+            filepath = os.path.join(full_path, filename)
+            try:
+                with open(filepath, 'rb') as f:
+                    data = pickle.load(f)
+                    # Check if data has required keys
+                    if 'data' in data and 'label' in data:
+                        valid_files.append((full_path, filename))
+                    else:
+                        corrupted_count += 1
+            except (EOFError, pickle.UnpicklingError, FileNotFoundError, Exception) as e:
+                corrupted_count += 1
+        
+        if corrupted_count > 0:
+            print(f"⚠️  Found {corrupted_count} corrupted/invalid files, skipping them")
+        
+        self.file_list = valid_files
+        print(f"✓ {len(self.file_list)} valid files remain")
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, idx):
+        full_path, filename = self.file_list[idx]
+        filepath = os.path.join(full_path, filename)
+        
+        import pickle
+        try:
+            with open(filepath, 'rb') as f:
+                data = pickle.load(f)
+            
+            X = torch.FloatTensor(data['data'])
+            y = int(data['label'])
+            
+            return X, y
+        except Exception as e:
+            # If file fails during training, return a zero sample
+            print(f"Warning: Failed to load {filepath}: {e}")
+            # Return zeros with correct shape (16 channels, 2000 time steps)
+            return torch.zeros(16, 2000), 0
+
+
+def train_seizure_detection(args):
+    # Verify GPU availability
+    print("\n" + "="*80)
+    print("GPU VERIFICATION")
+    print("="*80)
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"Number of GPUs: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+            print(f"    Memory: {torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB")
+        print(f"Current CUDA device: {torch.cuda.current_device()}")
+    else:
+        print("⚠️  WARNING: CUDA not available! Training will run on CPU (very slow)")
+    print("="*80 + "\n")
+    
+    # get data loaders for first 8 patients
+    train_loader, test_loader, val_loader = prepare_CHB_MIT_8patients_dataloader(args)
+    
+    # Verify dataloaders are not empty
+    if len(train_loader) == 0:
+        raise ValueError("Training dataloader is empty! Check your data filters.")
+    if len(val_loader) == 0:
+        raise ValueError("Validation dataloader is empty! Check your data filters.")
+    if len(test_loader) == 0:
+        print("⚠️  Warning: Test dataloader is empty! Test phase will be skipped.")
+    
+    # Debug: Check first batch
+    print("\nInspecting first batch of data:")
+    for X_batch, y_batch in train_loader:
+        print(f"  Input batch shape: {X_batch.shape}")
+        print(f"  Label batch shape: {y_batch.shape}")
+        print(f"  Input dtype: {X_batch.dtype}")
+        print(f"  Input device: {X_batch.device}")
+        print(f"  Label distribution: {torch.bincount(y_batch.long())}")
+        break
+
+    # define CNNTransformer model
+    print(f"\nModel configuration:")
+    print(f"  in_channels: {args.in_channels}")
+    print(f"  n_classes: {args.n_classes}")
+    print(f"  fft (token_size): {args.token_size}")
+    print(f"  steps: {args.hop_length // 5}")
+    
+    model = CNNTransformer(
+        in_channels=args.in_channels,
+        n_classes=args.n_classes,
+        fft=args.token_size,
+        steps=args.hop_length // 5,
+        dropout=0.2,
+        nhead=4,
+        emb_size=256,
+    )
+
+    lightning_model = LitModel_finetune(args, model)
+
+    # logger and callbacks
+    version = f"CHB_MIT_8patients-CNNTransformer-lr{args.lr}-bs{args.batch_size}-sr{args.sampling_rate}"
+    logger = TensorBoardLogger(
+        save_dir="./",
+        version=version,
+        name="log_seizure_detection",
+    )
+    
+    # Add checkpoint callback to save best model
+    checkpoint_callback = ModelCheckpoint(
+        monitor="val_auroc",
+        dirpath=f"./checkpoints/{version}",
+        filename="best-model-{epoch:02d}-{val_auroc:.4f}",
+        save_top_k=1,
+        mode="max",
+    )
+    
+    # Configure early stopping - check after validation runs
+    early_stop_callback = EarlyStopping(
+        monitor="val_auroc",
+        patience=10,
+        verbose=True,
+        mode="max",
+        check_on_train_epoch_end=False,  # Check after validation, not training
+    )
+
+    # Determine devices and strategy
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        if num_gpus > 1:
+            print(f"\n✓ Using {num_gpus} GPUs with DDP strategy")
+            devices = num_gpus
+            strategy = DDPStrategy(find_unused_parameters=False)
+        else:
+            print(f"\n✓ Using 1 GPU")
+            devices = 1
+            strategy = "auto"
+    else:
+        print("\n⚠️  No GPU available, using CPU")
+        devices = 1
+        strategy = "auto"
+
+    trainer = pl.Trainer(
+        devices=devices,
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        strategy=strategy,
+        benchmark=True,
+        enable_checkpointing=True,
+        logger=logger,
+        max_epochs=args.epochs,
+        callbacks=[early_stop_callback, checkpoint_callback],
+        check_val_every_n_epoch=1,  # Run validation every epoch
+        log_every_n_steps=50,  # Log training metrics every 50 steps
+    )
+
+    # train the model
+    print("\nStarting training for seizure detection on CHB-MIT (first 8 patients)...")
+    print(f"Training on: {trainer.accelerator.__class__.__name__}")
+    trainer.fit(
+        lightning_model, train_dataloaders=train_loader, val_dataloaders=val_loader
+    )
+
+    # Save final model parameters
+    final_model_path = f"./saved_models/{version}_final_model.pth"
+    os.makedirs("./saved_models", exist_ok=True)
+    torch.save({
+        'model_state_dict': lightning_model.model.state_dict(),
+        'threshold': lightning_model.threshold,
+        'args': args,
+    }, final_model_path)
+    print(f"\nFinal model saved to: {final_model_path}")
+    
+    # Check if best checkpoint exists
+    best_model_path = checkpoint_callback.best_model_path
+    if best_model_path:
+        print(f"Best model checkpoint saved to: {best_model_path}")
+        print(f"Best validation AUROC: {checkpoint_callback.best_model_score:.4f}")
+    else:
+        print("No best model checkpoint saved (validation may not have improved)")
+
+    # test the model
+    if len(test_loader) == 0:
+        print("\n⚠️  Skipping test phase: Test dataloader is empty")
+        return
+    
+    print("\nTesting the model...")
+    try:
+        if best_model_path:
+            print("Loading best model from checkpoint for testing...")
+            test_results = trainer.test(
+                model=lightning_model, ckpt_path=best_model_path, dataloaders=test_loader
+            )
+        else:
+            print("Using final model state for testing (no best checkpoint available)...")
+            test_results = trainer.test(
+                model=lightning_model, dataloaders=test_loader
+            )
+        
+        if test_results and len(test_results) > 0:
+            test_result = test_results[0]
+            print(f"\nFinal Test Results: {test_result}")
+            
+            # Save test results to file
+            results_path = f"./results/{version}_test_results.txt"
+            os.makedirs("./results", exist_ok=True)
+            
+            # Ensure threshold is a scalar
+            threshold_value = float(lightning_model.threshold) if isinstance(lightning_model.threshold, (np.ndarray, np.number)) else lightning_model.threshold
+            
+            with open(results_path, 'w') as f:
+                f.write("="*80 + "\n")
+                f.write("Test Results Summary\n")
+                f.write("="*80 + "\n")
+                f.write(f"Model: {version}\n")
+                f.write(f"Best checkpoint: {best_model_path if best_model_path else 'N/A'}\n")
+                f.write(f"Threshold: {threshold_value:.4f}\n\n")
+                for key, value in test_result.items():
+                    f.write(f"{key}: {value}\n")
+                f.write("="*80 + "\n")
+            print(f"Test results saved to: {results_path}")
+        else:
+            print("⚠️  Warning: Test returned no results. This may happen if:")
+            print("  - Test dataset is empty or too small")
+            print("  - All test samples have the same label (no class diversity)")
+            print("  - There was an error during testing")
+    
+    except Exception as e:
+        print(f"❌ Error during testing: {e}")
+        print("This may happen if the test dataset is too small or has issues.")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train CNNTransformer for seizure detection on CHB-MIT (train on patients 1-5, test on 6-8)"
+    )
+    parser.add_argument("--epochs", type=int, default=50, help="number of epochs")
+    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-5, help="weight decay")
+    parser.add_argument("--batch_size", type=int, default=128, help="batch size")
+    parser.add_argument("--num_workers", type=int, default=2, help="number of workers (default: 2, reduced to avoid corruption)")
+    parser.add_argument("--in_channels", type=int, default=16, help="number of input channels (CHB-MIT has 16)")
+    parser.add_argument("--sample_length", type=float, default=10, help="length (s) of sample")
+    parser.add_argument("--n_classes", type=int, default=1, help="number of output classes (binary)")
+    parser.add_argument("--sampling_rate", type=int, default=200, help="sampling rate (Hz)")
+    parser.add_argument("--token_size", type=int, default=200, help="token size (FFT window)")
+    parser.add_argument("--hop_length", type=int, default=100, help="token hop length (STFT hop)")
+    parser.add_argument("--data_fraction", type=float, default=1.0, help="fraction of dataset to use (0.0-1.0, default: 1.0 for full dataset)")
+    
+    args = parser.parse_args()
+    print("="*80)
+    print("Seizure Detection Training - CHB-MIT Dataset")
+    print("Train on patients 1-5, Validate/Test on patients 6-8")
+    print("Model: CNNTransformer")
+    if args.data_fraction < 1.0:
+        print(f"⚠️  QUICK TEST MODE: Using {args.data_fraction*100:.1f}% of data")
+    print("="*80)
+    print(args)
+    print("="*80)
+
+    train_seizure_detection(args)

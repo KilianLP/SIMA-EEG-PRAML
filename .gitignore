@@ -1,6 +1,23 @@
-model/__pycache__/*
-__pycache__/*
-log/*
-log-pretrain/*
-env_BIOT/*
+*.log
+*.ckpt
+__pycache__/
+*.pyc
+datasets/
+log_seizure_detection/
+checkpoints/
+*.out
+*.log
+*.ckpt
+__pycache__/
+*.pyc
+datasets/
+log_seizure_detection/
+checkpoints/
+*.out
 
+# Python virtual environments
+env_BIOT/
+venv/
+env/
+.env/
+*.egg-info/
