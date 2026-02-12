@@ -114,7 +114,7 @@ def parse_args():
         "--data-path",
         type=str,
         # required=True,
-        default="/Users/donoal/Documents/Travail IMT 3A/Recherche/Implémentation/SIMA-EEG/data/clean_segments", ###TO ADAPT###
+        default="data/clean_segments", ###TO ADAPT###
         help="Path to processed data directory",
     )
     parser.add_argument(

@@ -266,8 +266,8 @@ def start_process(pacient, num, start, end, sum_ind):
 
 # PARAMETERS
 
-signals_path = "/Volumes/Crucial X6/Travail/Dataset/physionet.org/files/chbmit/1.0.0"
-clean_path = "/Volumes/Crucial X6/Travail/Dataset/clean_signals"
+signals_path = "path_to_data" # Path to the data main directory
+clean_path = "path_to_clean_signals" # Path where to store clean signals for processing2
 
 if __name__ == '__main__':
     if not os.path.exists(clean_path):

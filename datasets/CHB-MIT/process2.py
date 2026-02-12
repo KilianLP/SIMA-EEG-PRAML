@@ -4,8 +4,8 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing as mp
 
-root = "/Volumes/Crucial X6/Travail/Dataset/clean_signals"
-out = "/Volumes/Crucial X6/Travail/Dataset/clean_segments"
+root = "path_to_clean_signals" # Path to the cleaned data main directory
+out = "path_to_clean_segments" # Path to the output directory for segments that will be used for our training
 
 # root = 'clean_signals'
 # out = 'clean_segments'
