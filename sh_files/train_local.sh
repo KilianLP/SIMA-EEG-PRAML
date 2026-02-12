@@ -81,11 +81,14 @@ echo "========================================="
 echo "Starting training with local data..."
 echo "========================================="
 
+#################################################
 # Change to your project directory
-cd /Brain/private/a23bono/recherche/BIOT
+# cd /Brain/private/....
+#################################################
+
 
 # Activate environment
-source env_BIOT/bin/activate
+source env_eeg/bin/activate
 
 # Set HOME to /tmp to avoid Kerberos issues with expired credentials
 export OLD_HOME="$HOME"
@@ -98,14 +101,9 @@ export HF_HOME="$HOME/.cache/huggingface"
 export TORCH_HOME="$HOME/.cache/torch"
 
 # Train with local data
-python experiments/train_chbmit.py \
+python main.py \
     --data-path $LOCAL_DATA \
     --model EEGformer \
-    --batch-size 16 \
-    --lr 0.000005 \
-    --num-workers 8 \
-    --skip-resample \
-    --no-validation \
     --epochs 50
 
 echo "========================================="
