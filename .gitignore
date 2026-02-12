@@ -17,7 +17,7 @@ logs/
 checkpoints/
 *.out
 
-.DS_Store
+*.DS_Store
 
 venv/
 env/
