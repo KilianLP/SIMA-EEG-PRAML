@@ -12,6 +12,10 @@ __pycache__/
 plots/
 *.pyc
 
+
+
+
+
 log_seizure_detection/
 logs/
 checkpoints/
