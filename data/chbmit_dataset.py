@@ -1,10 +1,3 @@
-"""
-CHB-MIT dataset loading and preparation utilities.
-
-This module provides dataset classes and dataloader preparation functions
-for the CHB-MIT seizure detection dataset.
-"""
-
 import os
 import pickle
 from typing import List, Tuple
@@ -14,24 +7,13 @@ import torch.utils.data
 import numpy as np
 from scipy.signal import resample
 
-from config.base_config import ExperimentConfig
+from trainer import Config
 from .validation import validate_pickle_files
 
 
-def compute_class_weights_from_files(root: str, files: List[str]) -> float:
+def compute_class_weights_from_files(root, files):
     """
     Fast class weight computation by reading only labels from pickle files.
-
-    This is much faster than iterating through dataloaders because it:
-    - Only reads label field from pickle
-    - Skips expensive data loading, resampling, and normalization
-
-    Args:
-        root: Directory containing pickle files
-        files: List of filenames
-
-    Returns:
-        Positive class weight (num_negatives / num_positives)
     """
     import pickle
 
@@ -77,17 +59,9 @@ def compute_class_weights_from_files(root: str, files: List[str]) -> float:
     return pos_weight
 
 
-def filter_files_by_patient(files: List[str], min_patient: int = 1, max_patient: int = 8) -> List[str]:
+def filter_files_by_patient(files, min_patient = 1, max_patient = 8):
     """
     Filter files to only include patients in range [min_patient, max_patient].
-
-    Args:
-        files: List of filenames
-        min_patient: Minimum patient number (inclusive)
-        max_patient: Maximum patient number (inclusive)
-
-    Returns:
-        Filtered list of filenames
     """
     filtered_files = []
     for f in files:
@@ -103,29 +77,8 @@ def filter_files_by_patient(files: List[str], min_patient: int = 1, max_patient:
 
 
 class CHBMITDataset(torch.utils.data.Dataset):
-    """
-    PyTorch Dataset for CHB-MIT EEG data.
 
-    Handles loading, resampling, and normalization of EEG data from pickle files.
-    Supports both 'X'/'y' and 'data'/'label' key naming conventions.
-    """
-
-    def __init__(
-        self,
-        root: str,
-        files: List[str],
-        sampling_rate: int = 200,
-        skip_resample: bool = False,
-    ):
-        """
-        Initialize dataset.
-
-        Args:
-            root: Root directory containing pickle files
-            files: List of filenames to load
-            sampling_rate: Target sampling rate (Hz)
-            skip_resample: If True, use native 256Hz (faster, skips resampling)
-        """
+    def __init__(self, root, files, sampling_rate = 200, skip_resample = False,):
         self.root = root
         self.files = files
         self.default_rate = 256  # CHB-MIT native sampling rate
@@ -136,17 +89,9 @@ class CHBMITDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.files)
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
+    def __getitem__(self, index):
         """
         Load and preprocess a single sample.
-
-        Args:
-            index: Sample index
-
-        Returns:
-            Tuple of (signal, label) where:
-                - signal: Tensor of shape (n_channels, n_timepoints)
-                - label: Integer label (0 or 1)
         """
         filepath = os.path.join(self.root, self.files[index])
 
@@ -169,15 +114,12 @@ class CHBMITDataset(torch.utils.data.Dataset):
                 # Resample from 256Hz to target sampling rate
                 # Input: (16 channels, 2560 time points) at 256Hz
                 # Output: (16 channels, 2000 time points) at 200Hz (default)
-                # Skip resampling if skip_resample=True (much faster!)
+                # Skip resampling if skip_resample=True
                 if not self.skip_resample and self.sampling_rate != self.default_rate:
                     X = resample(X, 10 * self.sampling_rate, axis=-1)
 
                 # Normalize by 95th percentile per channel
-                X = X / (
-                    np.quantile(np.abs(X), q=0.95, method="linear", axis=-1, keepdims=True)
-                    + 1e-8
-                )
+                X = X / (np.quantile(np.abs(X), q=0.95, method="linear", axis=-1, keepdims=True) + 1e-8)
 
                 X = torch.FloatTensor(X)
                 return X, y
@@ -195,26 +137,17 @@ class CHBMITDataset(torch.utils.data.Dataset):
         return torch.zeros(16, 10 * self.sampling_rate), 0
 
 
-def prepare_chbmit_dataloaders(
-    config: ExperimentConfig,
-) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+def prepare_chbmit_dataloaders(config,):
     """
     Prepare train, validation, and test dataloaders for CHB-MIT dataset.
-
-    Args:
-        config: Experiment configuration
-
-    Returns:
-        Tuple of (train_loader, val_loader, test_loader)
-
-    Raises:
-        FileNotFoundError: If data directory doesn't exist
-        RuntimeError: If no valid files are found
     """
     root = config.data.root_path
 
     # Verify data directory exists
     train_dir = os.path.join(root, "train")
+    val_dir = os.path.join(root, "val")
+    test_dir = os.path.join(root, "test")
+
     if not os.path.exists(train_dir):
         raise FileNotFoundError(
             f"Data directory not found: {train_dir}\n"
@@ -225,26 +158,14 @@ def prepare_chbmit_dataloaders(
     print("Preparing CHB-MIT Dataloaders")
     print("=" * 80)
 
-    # List all files
-    all_files = os.listdir(train_dir)
-    print(f"Found {len(all_files)} total files in {train_dir}")
+    # List files from each split directory
+    train_files = sorted(os.listdir(train_dir))
+    val_files = sorted(os.listdir(val_dir)) if os.path.exists(val_dir) else []
+    test_files = sorted(os.listdir(test_dir)) if os.path.exists(test_dir) else []
 
-    # Filter by patient groups
-    train_files = filter_files_by_patient(
-        all_files,
-        min_patient=config.data.train_patients[0],
-        max_patient=config.data.train_patients[1]
-    )
-    val_files = filter_files_by_patient(
-        all_files,
-        min_patient=config.data.val_patients[0],
-        max_patient=config.data.val_patients[1]
-    )
-    test_files = filter_files_by_patient(
-        all_files,
-        min_patient=config.data.test_patients[0],
-        max_patient=config.data.test_patients[1]
-    )
+    print(f"Found {len(train_files)} files in {train_dir}")
+    print(f"Found {len(val_files)} files in {val_dir}")
+    print(f"Found {len(test_files)} files in {test_dir}")
 
     print(f"\nPatient splits:")
     print(f"  Train (patients {config.data.train_patients[0]}-{config.data.train_patients[1]}): {len(train_files)} files")
@@ -278,7 +199,7 @@ def prepare_chbmit_dataloaders(
 
         print("\nValidating validation files...")
         val_files = validate_pickle_files(
-            train_dir,
+            val_dir,
             val_files,
             sample_validation=config.data.sample_validation,
             use_cache=True,
@@ -286,7 +207,7 @@ def prepare_chbmit_dataloaders(
 
         print("\nValidating test files...")
         test_files = validate_pickle_files(
-            train_dir,
+            test_dir,
             test_files,
             sample_validation=config.data.sample_validation,
             use_cache=True,
@@ -302,8 +223,8 @@ def prepare_chbmit_dataloaders(
     # Note: skip_resample can be enabled for faster loading (uses native 256Hz instead of 200Hz)
     skip_resample = getattr(config.data, 'skip_resample', False)
     train_dataset = CHBMITDataset(train_dir, train_files, config.data.sampling_rate, skip_resample=skip_resample)
-    val_dataset = CHBMITDataset(train_dir, val_files, config.data.sampling_rate, skip_resample=skip_resample)
-    test_dataset = CHBMITDataset(train_dir, test_files, config.data.sampling_rate, skip_resample=skip_resample)
+    val_dataset = CHBMITDataset(val_dir, val_files, config.data.sampling_rate, skip_resample=skip_resample)
+    test_dataset = CHBMITDataset(test_dir, test_files, config.data.sampling_rate, skip_resample=skip_resample)
 
     # Create dataloaders
     train_loader = torch.utils.data.DataLoader(

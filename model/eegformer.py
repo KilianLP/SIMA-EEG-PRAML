@@ -1,14 +1,3 @@
-"""
-EEGformer: Transformer-based architecture for EEG classification.
-
-This implements the EEGformer architecture with:
-- Embedding stage: 1D convolutions + positional encoding
-- Encoder stage: Multi-head attention + feed-forward network
-- Classification stage: Global pooling + MLP
-
-Reference architecture from paper specifications.
-"""
-
 import math
 import torch
 import torch.nn as nn
@@ -17,12 +6,8 @@ import torch.nn as nn
 class PositionalEncoding(nn.Module):
     """
     Positional encoding using sine and cosine functions.
-
-    Args:
-        d_model: Embedding dimension
-        max_len: Maximum sequence length
     """
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model, max_len = 5000):
         super().__init__()
 
         # Create positional encoding matrix
@@ -36,16 +21,7 @@ class PositionalEncoding(nn.Module):
         # Register as buffer (not a parameter, but part of state)
         self.register_buffer('pe', pe.unsqueeze(0))  # Shape: (1, max_len, d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Add positional encoding to input.
-
-        Args:
-            x: Input tensor of shape (batch, seq_len, d_model)
-
-        Returns:
-            Tensor with positional encoding added
-        """
+    def forward(self, x):
         # x shape: (batch, seq_len, d_model)
         # pe shape: (1, max_len, d_model)
         return x + self.pe[:, :x.size(1), :]
@@ -58,20 +34,8 @@ class TransformerEncoderBlock(nn.Module):
     - Layer normalization
     - Feed-forward network (Dense0 -> Dense1)
     - Residual connections
-
-    Args:
-        d_model: Embedding dimension (E)
-        nhead: Number of attention heads (H)
-        dim_feedforward: Hidden dimension in feed-forward network (h)
-        dropout: Dropout rate
     """
-    def __init__(
-        self,
-        d_model: int = 32,
-        nhead: int = 8,
-        dim_feedforward: int = 128,
-        dropout: float = 0.1,
-    ):
+    def __init__(self, d_model = 32, nhead = 8, dim_feedforward = 128, dropout = 0.1,):
         super().__init__()
 
         # Multi-head attention
@@ -95,15 +59,9 @@ class TransformerEncoderBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         """
         Forward pass through transformer encoder block.
-
-        Args:
-            x: Input tensor of shape (batch, seq_len, d_model)
-
-        Returns:
-            Output tensor of shape (batch, seq_len, d_model)
         """
         # Multi-head attention with residual connection
         attn_output, _ = self.self_attn(x, x, x)
@@ -125,17 +83,6 @@ class EEGformer(nn.Module):
     2. Positional encoding: Add learnable position information
     3. Encoder stage: Stack of transformer encoder blocks
     4. Classification stage: Global average pooling + MLP
-
-    Args:
-        in_channels: Number of input EEG channels (default: 4 for table, 16 for CHB-MIT)
-        n_classes: Number of output classes (1 for binary, 2 for multi-class)
-        seq_length: Input sequence length (default: 2048)
-        embed_dim: Embedding dimension (E, default: 32)
-        num_heads: Number of attention heads (H, default: 8)
-        num_layers: Number of transformer encoder blocks (default: 1)
-        dim_feedforward: Hidden dimension in feed-forward (h, default: 128)
-        kernel_size: Kernel size for convolutions (K, default: 5)
-        dropout: Dropout rate (default: 0.1)
     """
     def __init__(
         self,
@@ -223,16 +170,9 @@ class EEGformer(nn.Module):
         # Final classification layer (Dense2)
         self.classifier = nn.Linear(embed_dim, n_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         """
         Forward pass through EEGformer.
-
-        Args:
-            x: Input EEG tensor of shape (batch, channels, time_steps)
-               e.g., (128, 16, 2000) for CHB-MIT
-
-        Returns:
-            Logits of shape (batch, n_classes) or (batch,) for binary classification
         """
         # ============================================================
         # EMBEDDING STAGE
@@ -285,15 +225,9 @@ class EEGformer(nn.Module):
 
         return x
 
-    def get_attention_maps(self, x: torch.Tensor):
+    def get_attention_maps(self, x):
         """
         Get attention maps from all encoder blocks (useful for visualization).
-
-        Args:
-            x: Input EEG tensor
-
-        Returns:
-            List of attention weight tensors from each encoder block
         """
         attention_maps = []
 

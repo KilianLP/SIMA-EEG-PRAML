@@ -2,22 +2,23 @@
 *.ckpt
 __pycache__/
 *.pyc
-datasets/
+data/clean_segments/
 log_seizure_detection/
 checkpoints/
 *.out
 *.log
 *.ckpt
 __pycache__/
+plots/
 *.pyc
-datasets/
+
 log_seizure_detection/
+logs/
 checkpoints/
 *.out
 
-# Python virtual environments
-env_BIOT/
 venv/
 env/
 .env/
 *.egg-info/
+

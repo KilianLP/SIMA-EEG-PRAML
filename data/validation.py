@@ -1,9 +1,3 @@
-"""
-File validation utilities for CHB-MIT dataset.
-
-This module provides functions for validating pickle files and caching
-validation results to speed up repeated runs.
-"""
 
 import os
 import pickle
@@ -15,15 +9,9 @@ from pathlib import Path
 import numpy as np
 
 
-def get_cache_path(root_dir: str) -> Path:
+def get_cache_path(root_dir):
     """
     Get path to validation cache file.
-
-    Args:
-        root_dir: Root directory containing data files
-
-    Returns:
-        Path to cache file
     """
     # Create a hash of the directory path for the cache filename
     dir_hash = hashlib.md5(root_dir.encode()).hexdigest()[:8]
@@ -31,15 +19,9 @@ def get_cache_path(root_dir: str) -> Path:
     return cache_dir / f".validation_cache_{dir_hash}.pkl"
 
 
-def load_validation_cache(root_dir: str) -> Optional[Set[str]]:
+def load_validation_cache(root_dir):
     """
     Load cached validation results.
-
-    Args:
-        root_dir: Root directory containing data files
-
-    Returns:
-        Set of valid filenames if cache is valid, None otherwise
     """
     cache_path = get_cache_path(root_dir)
     if not cache_path.exists():
@@ -64,13 +46,10 @@ def load_validation_cache(root_dir: str) -> Optional[Set[str]]:
         return None
 
 
-def save_validation_cache(root_dir: str, valid_files: List[str]) -> None:
+def save_validation_cache(root_dir, valid_files):
     """
     Save validation results to cache.
 
-    Args:
-        root_dir: Root directory containing data files
-        valid_files: List of valid filenames
     """
     cache_path = get_cache_path(root_dir)
     cache = {
@@ -88,28 +67,9 @@ def save_validation_cache(root_dir: str, valid_files: List[str]) -> None:
         print(f"⚠ Failed to save validation cache: {e}")
 
 
-def validate_pickle_files(
-    root_dir: str,
-    files: List[str],
-    sample_validation: bool = True,
-    sample_rate: float = 0.01,
-    use_cache: bool = True,
-) -> List[str]:
+def validate_pickle_files(root_dir, files, sample_validation=True, sample_rate=0.01, use_cache=True,):
     """
     Validate pickle files and remove corrupted ones.
-
-    Args:
-        root_dir: Directory containing the files
-        files: List of filenames to validate
-        sample_validation: If True, only validate a sample to speed up startup
-        sample_rate: Fraction of files to sample for validation
-        use_cache: If True, use cached validation results when available
-
-    Returns:
-        List of valid filenames
-
-    Raises:
-        RuntimeError: If more than 50% of files are corrupted
     """
     # Try to load from cache first
     if use_cache:

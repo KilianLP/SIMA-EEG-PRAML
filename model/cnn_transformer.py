@@ -5,23 +5,6 @@ import torch.nn as nn
 
 class ResBlock(nn.Module):
     """Convolutional Residual Block 2D
-    This block stacks two convolutional layers with batch normalization,
-    max pooling, dropout, and residual connection.
-    Args:
-        in_channels: number of input channels.
-        out_channels: number of output channels.
-        stride: stride of the convolutional layers.
-        downsample: whether to use a downsampling residual connection.
-        pooling: whether to use max pooling.
-    Example:
-        >>> import torch
-        >>> from pyhealth.models import ResBlock2D
-        >>>
-        >>> model = ResBlock2D(6, 16, 1, True, True)
-        >>> input_ = torch.randn((16, 6, 28, 150))  # (batch, channel, height, width)
-        >>> output = model(input_)
-        >>> output.shape
-        torch.Size([16, 16, 14, 75])
     """
 
     def __init__(
@@ -63,7 +46,7 @@ class ResBlock(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 1000):
+    def __init__(self, d_model, dropout=0.1, max_len=1000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -78,13 +61,7 @@ class PositionalEncoding(nn.Module):
         pe = pe.unsqueeze(0)
         self.register_buffer("pe", pe)
 
-    def forward(self, x: torch.FloatTensor) -> torch.FloatTensor:
-        """
-        Args:
-            x: `embeddings`, shape (batch, max_len, d_model)
-        Returns:
-            `encoder input`, shape (batch, max_len, d_model)
-        """
+    def forward(self, x):
         x = x + self.pe[:, : x.size(1)]
         return self.dropout(x)
 

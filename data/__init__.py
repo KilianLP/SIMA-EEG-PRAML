@@ -1,4 +1,3 @@
-"""Data loading and validation utilities for BIOT."""
 
 from .chbmit_dataset import (
     CHBMITDataset,

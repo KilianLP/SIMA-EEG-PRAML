@@ -4,8 +4,8 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing as mp
 
-root = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_signals"
-out = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_segments"
+root = "/Volumes/Crucial X6/Travail/Dataset/clean_signals"
+out = "/Volumes/Crucial X6/Travail/Dataset/clean_segments"
 
 # root = 'clean_signals'
 # out = 'clean_segments'
@@ -14,8 +14,8 @@ if not os.path.exists(out):
     os.makedirs(out)
 
 # dump chb23 and chb24 to test, ch21 and ch22 to val, and the rest to train
-test_pats = ["chb23", "chb24"]
-val_pats = ["chb21", "chb22"]
+test_pats = ["chb07"]
+val_pats = ["chb08"]
 train_pats = [
     "chb01",
     "chb02",
@@ -23,20 +23,6 @@ train_pats = [
     "chb04",
     "chb05",
     "chb06",
-    "chb07",
-    "chb08",
-    "chb09",
-    "chb10",
-    "chb11",
-    "chb12",
-    "chb13",
-    "chb14",
-    "chb15",
-    "chb16",
-    "chb17",
-    "chb18",
-    "chb19",
-    "chb20",
 ]
 channels = [
     "FP1-F7",
@@ -62,7 +48,14 @@ SAMPLING_RATE = 256
 def sub_to_segments(folder, out_folder):
     print(f"Processing {folder}...")
     # each recording
-    for f in tqdm(os.listdir(os.path.join(root, folder))):
+
+    folder_path = os.path.join(root, folder)
+    
+    # Filter out hidden files and non-files
+    files = [f for f in os.listdir(folder_path) 
+             if not f.startswith('.') and os.path.isfile(os.path.join(folder_path, f))]
+
+    for f in tqdm(files):
         print(f"Processing {folder}/{f}...")
         record = pickle.load(open(os.path.join(root, folder, f), "rb"))
         """
@@ -147,23 +140,52 @@ def sub_to_segments(folder, out_folder):
                     ),
                 )
 
+############ TO CHANGE ON WINDOWS ############
 
-# parallel parameters
-folders = os.listdir(root)
-out_folders = []
-for folder in folders:
-    if folder in test_pats:
-        out_folder = os.path.join(out, "test")
-    elif folder in val_pats:
-        out_folder = os.path.join(out, "val")
-    else:
-        out_folder = os.path.join(out, "train")
+# # parallel parameters
+# folders = os.listdir(root)
+# out_folders = []
+# for folder in folders:
+#     if folder in test_pats:
+#         out_folder = os.path.join(out, "test")
+#     elif folder in val_pats:
+#         out_folder = os.path.join(out, "val")
+#     else:
+#         out_folder = os.path.join(out, "train")
 
-    if not os.path.exists(out_folder):
-        os.makedirs(out_folder)
+#     if not os.path.exists(out_folder):
+#         os.makedirs(out_folder)
 
-    out_folders.append(out_folder)
+#     out_folders.append(out_folder)
 
-# process in parallel
-with mp.Pool(mp.cpu_count()) as pool:
-    res = pool.starmap(sub_to_segments, zip(folders, out_folders))
+# # process in parallel
+# with mp.Pool(mp.cpu_count()) as pool:
+#     res = pool.starmap(sub_to_segments, zip(folders, out_folders))
+
+
+if __name__ == '__main__':
+    if not os.path.exists(out):
+        os.makedirs(out)
+
+
+    # parallel parameters - filter out hidden files and ensure only directories
+    folders = [f for f in os.listdir(root) 
+               if not f.startswith('.') and os.path.isdir(os.path.join(root, f))]
+    out_folders = []
+
+    for folder in folders:
+        if folder in test_pats:
+            out_folder = os.path.join(out, "test")
+        elif folder in val_pats:
+            out_folder = os.path.join(out, "val")
+        else:
+            out_folder = os.path.join(out, "train")
+
+        if not os.path.exists(out_folder):
+            os.makedirs(out_folder)
+
+        out_folders.append(out_folder)
+
+    # process in parallel
+    with mp.Pool(mp.cpu_count()) as pool:
+        res = pool.starmap(sub_to_segments, zip(folders, out_folders))

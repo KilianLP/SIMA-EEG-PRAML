@@ -230,47 +230,69 @@ def start_process(pacient, num, start, end, sum_ind):
     process_files(pacient, valid_channels, channels, start, end)
 
 
+# # PARAMETERS
+# signals_path = "../../../physionet.org/files/chbmit/1.0.0"  # Path to the data main directory
+# clean_path = "clean_signals"  # Path where to store clean data
+
+# if not os.path.exists(clean_path):
+#     os.makedirs(clean_path)
+
+# # Clean pacients one by one manually with these parameters
+# pacient = "04"
+# num = "01"  # Reference file
+# summary_index = 0  # Index of channels summary reference
+# start = 28  # Number of first file to process
+# end = 28  # Number of last file to process
+# # Start the process
+# # start_process(pacient, num, start, end, summary_index)
+
+
+# # FULL DATA PROCESS
+# parameters = [
+#     ("01", "01", 2, 46, 0),
+#     ("02", "01", 2, 35, 0),
+#     ("03", "01", 2, 38, 0),
+#     ("04", "07", 1, 43, 1),
+#     ("05", "01", 2, 39, 0),
+#     ("06", "01", 2, 24, 0),
+#     ("07", "01", 2, 19, 0),
+#     ("08", "02", 3, 29, 0),
+# ]
+
+# with mp.Pool(mp.cpu_count()) as pool:
+#     res = pool.starmap(start_process, parameters)
+
+
+
 # PARAMETERS
-signals_path = "/Brain/private/DT_Reve_raw/CHBMIT/physionet.org/files/chbmit/1.0.0"  # Path to the data main directory
-clean_path = "/Brain/private/DT_Reve_tmp/CHBMIT_processed/clean_signals"  # Path where to store clean data
 
-if not os.path.exists(clean_path):
-    os.makedirs(clean_path)
+signals_path = "/Volumes/Crucial X6/Travail/Dataset/physionet.org/files/chbmit/1.0.0"
+clean_path = "/Volumes/Crucial X6/Travail/Dataset/clean_signals"
 
-# Clean pacients one by one manually with these parameters
-pacient = "04"
-num = "01"  # Reference file
-summary_index = 0  # Index of channels summary reference
-start = 28  # Number of first file to process
-end = 28  # Number of last file to process
-# Start the process
-# start_process(pacient, num, start, end, summary_index)
+if __name__ == '__main__':
+    if not os.path.exists(clean_path):
+        os.makedirs(clean_path)
 
+    # Clean pacients one by one manually with these parameters
+    pacient = "04"
+    num = "01"  # Reference file
+    summary_index = 0  # Index of channels summary reference
+    start = 28  # Number of first file to process
+    end = 28  # Number of last file to process
+    # Start the process
+    # start_process(pacient, num, start, end, summary_index)
 
-# FULL DATA PROCESS
-parameters = [
-    ("01", "01", 2, 46, 0),
-    ("02", "01", 2, 35, 0),
-    ("03", "01", 2, 38, 0),
-    ("05", "01", 2, 39, 0),
-    ("06", "01", 2, 24, 0),
-    ("07", "01", 2, 19, 0),
-    ("08", "02", 3, 29, 0),
-    ("10", "01", 2, 89, 0),
-    ("11", "01", 2, 99, 0),
-    ("14", "01", 2, 42, 0),
-    ("20", "01", 2, 68, 0),
-    ("21", "01", 2, 33, 0),
-    ("22", "01", 2, 77, 0),
-    ("23", "06", 7, 20, 0),
-    ("24", "01", 3, 21, 0),
-    ("04", "07", 1, 43, 1),
-    ("09", "02", 1, 19, 1),
-    ("15", "02", 1, 63, 1),
-    ("16", "01", 2, 19, 0),
-    ("18", "02", 1, 36, 1),
-    ("19", "02", 1, 30, 1),
-]
+    # FULL DATA PROCESS
+    parameters = [
+        ("01", "01", 2, 46, 0),
+        ("02", "01", 2, 35, 0),
+        ("03", "01", 2, 38, 0),
+        ("04", "07", 1, 43, 1),
+        ("05", "01", 2, 39, 0),
+        ("06", "01", 2, 24, 0),
+        ("07", "01", 2, 19, 0),
+        ("08", "02", 3, 29, 0),
+    ]
 
-with mp.Pool(mp.cpu_count()) as pool:
-    res = pool.starmap(start_process, parameters)
+    with mp.Pool(mp.cpu_count()) as pool:
+        res = pool.starmap(start_process, parameters)
