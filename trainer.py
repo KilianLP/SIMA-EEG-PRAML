@@ -104,7 +104,8 @@ class Config:
 #Loss function
 def binary_cross_entropy_loss(y_hat, y, pos_weight= None):
     """
-    Binary cross entropy loss with optional class weighting.
+    Stable Binary cross entropy loss with optional class weighting.
+    https://medium.com/@sahilcarterr/why-nn-bcewithlogitsloss-numerically-stable-6a04f3052967
     """
     y_hat = y_hat.view(-1, 1)
     y = y.view(-1, 1)
