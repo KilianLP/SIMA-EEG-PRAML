@@ -1,191 +1,97 @@
-import pickle
 import os
+import pickle
 import numpy as np
 from tqdm import tqdm
-import multiprocessing as mp
 
-root = "path_to_clean_signals" # Path to the cleaned data main directory
-out = "path_to_clean_segments" # Path to the output directory for segments that will be used for our training
+# ============================================================
+# PARAMETERS
+# ============================================================
 
-# root = 'clean_signals'
-# out = 'clean_segments'
+ROOT = "/Brain/private/Clean_CHB_MIT_4c_8p/clean_four_channels"  # flat folder of .pkl files
+OUT = "/Brain/private/Clean_CHB_MIT_4c_8p/clean_segments"
 
-if not os.path.exists(out):
-    os.makedirs(out)
-
-# dump chb23 and chb24 to test, ch21 and ch22 to val, and the rest to train
-test_pats = ["chb07"]
-val_pats = ["chb08"]
-train_pats = [
-    "chb01",
-    "chb02",
-    "chb03",
-    "chb04",
-    "chb05",
-    "chb06",
-]
-channels = [
-    "FP1-F7",
-    "F7-T7",
-    "T7-P7",
-    "P7-O1",
-    "FP2-F8",
-    "F8-T8",
-    "T8-P8",
-    "P8-O2",
-    "FP1-F3",
-    "F3-C3",
-    "C3-P3",
-    "P3-O1",
-    "FP2-F4",
-    "F4-C4",
-    "C4-P4",
-    "P4-O2",
-]
 SAMPLING_RATE = 256
+WINDOW_SIZE = 8 * SAMPLING_RATE           # 2048
+STRIDE_TRAIN = WINDOW_SIZE                # 8s
+STRIDE_TEST = 2 * SAMPLING_RATE           # 2s
+IGNORE_POST_MINUTES = 15
+
+CHANNELS = ["F7-T7", "T7-P7", "F8-T8", "T8-P8"]
+
+# ============================================================
+# DATA GENERATION
+# ============================================================
+
+def extract_signal(record):
+    return np.array([record[ch] for ch in CHANNELS])
 
 
-def sub_to_segments(folder, out_folder):
-    print(f"Processing {folder}...")
-    # each recording
+def label_window_fully_contained(start_idx, seizure_times):
+    """
+    Fenêtre positive UNIQUEMENT si entièrement contenue dans la crise.
+    """
+    end_idx = start_idx + WINDOW_SIZE
+    for sz_start, sz_end in seizure_times:
+        if start_idx >= sz_start and end_idx <= sz_end:
+            return 1
+    return 0
 
-    folder_path = os.path.join(root, folder)
-    
-    # Filter out hidden files and non-files
-    files = [f for f in os.listdir(folder_path) 
-             if not f.startswith('.') and os.path.isfile(os.path.join(folder_path, f))]
 
-    for f in tqdm(files):
-        print(f"Processing {folder}/{f}...")
-        record = pickle.load(open(os.path.join(root, folder, f), "rb"))
-        """
-        {'FP1-F7': array([-145.93406593,    0.1953602 ,    0.1953602 , ...,  -11.52625153, -2.93040293,   19.34065934]), 
-         'F7-T7': array([-104.51770452,    0.1953602 ,    0.1953602 , ...,   23.63858364, 27.54578755,   30.67155067]), 
-         'T7-P7': array([-42.78388278,   0.1953602 ,   0.1953602 , ...,  48.64468864, 45.12820513,  34.57875458]), 
-        'P7-O1': array([-33.01587302,   0.1953602 ,   0.1953602 , ..., -17.77777778, -20.51282051, -25.59218559]), 
-       'FP1-F3': array([-170.94017094,    0.1953602 ,    0.1953602 , ...,  -34.96947497, -25.98290598,    0.1953602 ]), 
-        'F3-C3': array([-110.76923077,    0.1953602 ,    0.1953602 , ...,   38.0952381 , 48.64468864,   50.20757021]), 
-         'C3-P3': array([11.91697192,  0.1953602 ,  0.1953602 , ..., 40.04884005, 33.7973138 , 25.98290598]), 
-       'P3-O1': array([-56.45909646,   0.1953602 ,   0.1953602 , ...,   0.97680098, -6.44688645, -16.60561661]), 
-        'FP2-F4': array([-139.29181929,    0.1953602 ,    0.1953602 , ...,   -2.14896215, -2.14896215,   -0.58608059]), 
-         'F4-C4': array([-1.36752137,  0.1953602 ,  0.1953602 , ...,  1.75824176, 2.93040293,  7.22832723]), 
-        'C4-P4': array([63.88278388,  0.1953602 ,  0.1953602 , ..., 16.996337  , 23.63858364, 25.59218559]), 
-       'P4-O2': array([-14.26129426,   0.1953602 ,   0.1953602 , ..., -13.08913309, -8.00976801, -13.47985348]), 
-        'FP2-F8': array([-2.67838828e+02,  1.95360195e-01,  1.95360195e-01, ..., 6.83760684e+00,  6.05616606e+00,  6.44688645e+00]), 
-        'F8-T8': array([ 57.24053724,   0.1953602 ,   0.1953602 , ...,  -2.53968254,  -9.96336996, -12.6984127 ]), 
-        'T8-P8': array([44.73748474,  0.1953602 ,  0.1953602 , ..., 16.996337  , 22.46642247, 26.37362637]), 
-       'P8-O2': array([ 74.82295482,   0.1953602 ,  -0.1953602 , ..., -17.38705739, -1.75824176,  -2.53968254]), 
-        'FZ-CZ': array([-106.08058608,    0.1953602 ,    0.1953602 , ...,   24.81074481, 28.71794872,   28.71794872]), 
-         'CZ-PZ': array([84.59096459,  0.1953602 ,  0.1953602 , ..., 18.94993895, 20.51282051, 18.16849817]), 
-       'P7-T7': array([ 43.17460317,   0.1953602 ,   0.1953602 , ..., -48.25396825, -44.73748474, -34.18803419]), 
-       'T7-FT9': array([-57.24053724,   0.1953602 ,   0.1953602 , ..., -11.91697192,  -3.71184371,   2.14896215]), 
-        'FT9-FT10': array([-2.64713065e+02,  1.95360195e-01,  5.86080586e-01, ..., 9.76800977e-01, -1.58241758e+01, -2.94993895e+01]), 
-        'FT10-T8': array([ 94.74969475,   0.1953602 ,   0.1953602 , ...,  -7.22832723, -10.35409035, -13.47985348]), 
-       'T8-P8-2': array([44.73748474,  0.1953602 ,  0.1953602 , ..., 16.996337  , 22.46642247, 26.37362637]), 
-       'metadata': {'seizures': 0, 'times': [], 'channels': ['FP1-F7', 'F7-T7', 'T7-P7', 'P7-O1', 'FP1-F3', 'F3-C3', 'C3-P3', 'P3-O1', 'FP2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'FP2-F8', 'F8-T8', 'T8-P8', 'P8-O2', 'FZ-CZ', 'CZ-PZ', 'P7-T7', 'T7-FT9', 'FT9-FT10', 'FT10-T8', 'T8-P8-2']}}
-        """
-        signal = []
-        for channel in channels:
-            if channel in record:
-                signal.append(record[channel])
-            else:
-                raise ValueError(f"Channel {channel} not found in record {record}")
-        signal = np.array(signal)
+def generate_segments(record_path, output_folder, stride):
+    record = pickle.load(open(record_path, "rb"))
 
-        if "times" in record["metadata"]:
-            seizure_times = record["metadata"]["times"]
+    signal = extract_signal(record)
+    seizure_times = record["metadata"]["times"]
+
+    n_samples = signal.shape[1]
+
+    for i in range(0, n_samples - WINDOW_SIZE + 1, stride):
+        segment = signal[:, i:i + WINDOW_SIZE]
+        label = label_window_fully_contained(i, seizure_times)
+
+        out_name = os.path.basename(record_path).replace(".pkl", f"-{i}.pkl")
+
+        pickle.dump(
+            {"X": segment, "y": label},
+            open(os.path.join(output_folder, out_name), "wb")
+        )
+
+
+def build_dataset(train_patients, test_patients):
+    files = [
+        f
+        for f in os.listdir(ROOT)
+        if f.endswith(".pkl") and os.path.isfile(os.path.join(ROOT, f))
+    ]
+
+    for file in tqdm(files):
+        # filename format: chb02_21_4ch.pkl -> patient is "chb02"
+        patient = file.split("_")[0]
+
+        if patient in test_patients:
+            split = "test"
+            stride = STRIDE_TEST
+        elif patient in train_patients:
+            split = "train"
+            stride = STRIDE_TRAIN
         else:
-            seizure_times = []
+            continue
 
-        # split the signal into segments on the second dimension by SAMPLING_RATE * 10 seconds
-        for i in range(0, signal.shape[1], SAMPLING_RATE * 10):
-            segment = signal[:, i : i + 10 * SAMPLING_RATE]
-            if segment.shape[1] == 10 * SAMPLING_RATE:
-                # judge whether the segment contains seizures
-                label = 0
+        output_folder = os.path.join(OUT, split)
+        os.makedirs(output_folder, exist_ok=True)
 
-                for seizure_time in seizure_times:
-                    if (
-                        i < seizure_time[0] < i + 10 * SAMPLING_RATE
-                        or i < seizure_time[1] < i + 10 * SAMPLING_RATE
-                    ):
-                        label = 1
-                        break
+        record_path = os.path.join(ROOT, file)
+        generate_segments(record_path, output_folder, stride)
 
-                # save the segment
-                pickle.dump(
-                    {"X": segment, "y": label},
-                    open(
-                        os.path.join(out_folder, f"{f.split('.')[0]}-{i}.pkl"),
-                        "wb",
-                    ),
-                )
+# ============================================================
+# MAIN
+# ============================================================
 
-        for idx, seizure_time in enumerate(seizure_times):
-            for i in range(
-                max(0, seizure_time[0] - SAMPLING_RATE),
-                min(seizure_time[1] + SAMPLING_RATE, signal.shape[1]),
-                5 * SAMPLING_RATE,
-            ):
-                segment = signal[:, i : i + 10 * SAMPLING_RATE]
-                label = 1
-                # save the segment
-                pickle.dump(
-                    {"X": segment, "y": label},
-                    open(
-                        os.path.join(
-                            out_folder, f"{f.split('.')[0]}-s-{idx}-add-{i}.pkl"
-                        ),
-                        "wb",
-                    ),
-                )
+if __name__ == "__main__":
 
-############ TO CHANGE ON WINDOWS ############
+    os.makedirs(OUT, exist_ok=True)
 
-# # parallel parameters
-# folders = os.listdir(root)
-# out_folders = []
-# for folder in folders:
-#     if folder in test_pats:
-#         out_folder = os.path.join(out, "test")
-#     elif folder in val_pats:
-#         out_folder = os.path.join(out, "val")
-#     else:
-#         out_folder = os.path.join(out, "train")
+    train_patients = ["chb02", "chb03", "chb04", "chb05", "chb06", "chb07", "chb08"]
+    test_patients = ["chb01"]
 
-#     if not os.path.exists(out_folder):
-#         os.makedirs(out_folder)
-
-#     out_folders.append(out_folder)
-
-# # process in parallel
-# with mp.Pool(mp.cpu_count()) as pool:
-#     res = pool.starmap(sub_to_segments, zip(folders, out_folders))
-
-
-if __name__ == '__main__':
-    if not os.path.exists(out):
-        os.makedirs(out)
-
-
-    # parallel parameters - filter out hidden files and ensure only directories
-    folders = [f for f in os.listdir(root) 
-               if not f.startswith('.') and os.path.isdir(os.path.join(root, f))]
-    out_folders = []
-
-    for folder in folders:
-        if folder in test_pats:
-            out_folder = os.path.join(out, "test")
-        elif folder in val_pats:
-            out_folder = os.path.join(out, "val")
-        else:
-            out_folder = os.path.join(out, "train")
-
-        if not os.path.exists(out_folder):
-            os.makedirs(out_folder)
-
-        out_folders.append(out_folder)
-
-    # process in parallel
-    with mp.Pool(mp.cpu_count()) as pool:
-        res = pool.starmap(sub_to_segments, zip(folders, out_folders))
+    build_dataset(train_patients, test_patients)
