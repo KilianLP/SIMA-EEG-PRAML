@@ -35,7 +35,7 @@ class TransformerEncoderBlock(nn.Module):
     - Feed-forward network (Dense0 -> Dense1)
     - Residual connections
     """
-    def __init__(self, d_model = 32, nhead = 8, dim_feedforward = 128, dropout = 0.1,):
+    def __init__(self, d_model = 32, nhead = 8, dim_feedforward = 128, dropout = 0):
         super().__init__()
 
         # Multi-head attention
