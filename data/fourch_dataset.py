@@ -28,7 +28,7 @@ class CHBMIT4ChDataset(torch.utils.data.Dataset):
             sample: Dict = pickle.load(f)
 
         X = sample["X"]
-        y = int(sample["Y"])
+        y = int(sample["y"])
 
         # Replace NaNs with zero and mild per-channel normalization
         X = np.nan_to_num(X, copy=False)

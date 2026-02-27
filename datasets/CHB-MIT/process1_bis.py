@@ -167,9 +167,9 @@ def extract_selected_channels(
     for label in labels:
         sig = label_to_signal.get(label)
         if sig is None:
-            clean_dict[label] = np.zeros(target_len, dtype=float)
+            clean_dict[label] = np.zeros(target_len, dtype=np.float32)
         else:
-            clean_dict[label] = sig
+            clean_dict[label] = sig.astype(np.float32, copy=False)
 
     out_path = os.path.join(
         target_dir, os.path.basename(edf_path).replace(".edf", "_4ch.pkl")
@@ -193,11 +193,15 @@ def process_first_eight_patients(
         Dict mapping EDF path -> output pickle path (only processed files).
     """
     records = load_first_eight_records(records_root)
+    print(f"Loaded EDF paths for patients 1–8: { {pid: len(files) for pid, files in records.items()} }")
     electrode_map_per_file = map_electrodes_per_file(records_root, electrodes)
+    print(f"Mapped electrodes to channels for {len(electrode_map_per_file)} EDF files")
 
     outputs: Dict[str, str] = {}
     for file_list in records.values():
+        print(f"Processing {len(file_list)} EDF files for a patient...")
         for edf_path in file_list:
+            print(f"  Processing {edf_path}...")
             channel_map = electrode_map_per_file.get(edf_path)
             if channel_map is None:
                 continue  # skip if no summary-derived channels
