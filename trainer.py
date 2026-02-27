@@ -17,9 +17,10 @@ class DataConfig:
     root_path: str = "./data"  # provide via --data-path
 
     # Data splits (patient IDs)
-    train_patients: Tuple[int, int] = (1, 5)
-    val_patients: Tuple[int, int] = (6, 6)
-    test_patients: Tuple[int, int] = (7, 8)
+    train_patients: Tuple[int, int] = (2, 24)  # cross-subject: exclude chb01 from train/val
+    val_patients: Tuple[int, int] = (2, 24)
+    test_patients: Tuple[int, int] = (1, 1)    # hold-out chb01 for evaluation
+    exclude_patients: List[int] = field(default_factory=lambda: [1])
 
     # Data loading parameters
     batch_size: int = 16
@@ -28,8 +29,8 @@ class DataConfig:
     data_fraction: float = 1.0
 
     # Data preprocessing
-    sampling_rate: int = 200
-    sample_length: float = 10.0
+    sampling_rate: int = 256  # process2 outputs 256 Hz segments
+    sample_length: float = 8.0  # process2 uses 8-second windows
     skip_resample: bool = False
 
     # File validation
@@ -40,7 +41,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     name: str = "EEGformer"
-    in_channels: int = 16
+    in_channels: int = 4  # process1_bis/process2 keep 4 bipolar channels
     n_classes: int = 1
 
     # Signal processing parameters

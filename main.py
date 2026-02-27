@@ -59,8 +59,8 @@ def create_model(model_name, config):
 
     elif model_name == "EEGformer":
         # Compute sequence length based on sampling rate
-        actual_sr = 256 if config.data.skip_resample else config.data.sampling_rate
-        seq_length = int(10 * actual_sr)
+        actual_sr = config.data.sampling_rate
+        seq_length = int(config.data.sample_length * actual_sr)
         return EEGformer(
             in_channels=mc.in_channels,
             n_classes=mc.n_classes,
@@ -144,12 +144,19 @@ def parse_args():
         action="store_true",
         help="Skip file validation",
     )
+    parser.add_argument(
+        "--exclude-patients",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Patient IDs to exclude from train/val (e.g., 1 for chb01)",
+    )
 
     # Training configuration
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
+        default=100,
         help="Number of training epochs",
     )
     parser.add_argument(
@@ -223,8 +230,9 @@ def build_config(args):
         num_workers=args.num_workers,
         data_fraction=args.data_fraction,
         skip_resample=args.skip_resample,
-        sampling_rate=256 if args.skip_resample else 200,
+        sampling_rate=256,  # process2 outputs 256 Hz
         validate_files=not args.no_validation,
+        exclude_patients=args.exclude_patients or DataConfig().exclude_patients,
     )
 
     # Model config
@@ -318,7 +326,8 @@ def main():
                 train_files = filter_files_by_patient(
                     all_files,
                     min_patient=config.data.train_patients[0],
-                    max_patient=config.data.train_patients[1]
+                    max_patient=config.data.train_patients[1],
+                    exclude_patients=config.data.exclude_patients,
                 )
                 if config.data.data_fraction < 1.0:
                     train_files = train_files[:int(len(train_files) * config.data.data_fraction)]

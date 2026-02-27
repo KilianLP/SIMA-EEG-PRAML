@@ -1,6 +1,6 @@
 import os
 import pickle
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import torch
 import torch.utils.data
@@ -59,16 +59,19 @@ def compute_class_weights_from_files(root, files):
     return pos_weight
 
 
-def filter_files_by_patient(files, min_patient = 1, max_patient = 8):
+def filter_files_by_patient(files, min_patient: int = 1, max_patient: int = 8, exclude_patients: Optional[List[int]] = None):
     """
     Filter files to only include patients in range [min_patient, max_patient].
     """
+    exclude_set = set(exclude_patients or [])
     filtered_files = []
     for f in files:
         # Extract patient number from filename (e.g., chb01, chb02, etc.)
         if f.startswith('chb'):
             try:
                 patient_num = int(f[3:5])
+                if patient_num in exclude_set:
+                    continue
                 if min_patient <= patient_num <= max_patient:
                     filtered_files.append(f)
             except ValueError:
@@ -78,12 +81,13 @@ def filter_files_by_patient(files, min_patient = 1, max_patient = 8):
 
 class CHBMITDataset(torch.utils.data.Dataset):
 
-    def __init__(self, root, files, sampling_rate = 200, skip_resample = False,):
+    def __init__(self, root, files, sampling_rate: int = 200, skip_resample: bool = False, sample_length: float = 10.0):
         self.root = root
         self.files = files
         self.default_rate = 256  # CHB-MIT native sampling rate
         self.sampling_rate = sampling_rate if not skip_resample else self.default_rate
         self.skip_resample = skip_resample
+        self.sample_length = sample_length
         self.failed_files = set()
 
     def __len__(self) -> int:
@@ -111,12 +115,11 @@ class CHBMITDataset(torch.utils.data.Dataset):
                 else:
                     raise ValueError(f"Unknown keys in pickle file: {list(sample.keys())}")
 
-                # Resample from 256Hz to target sampling rate
-                # Input: (16 channels, 2560 time points) at 256Hz
-                # Output: (16 channels, 2000 time points) at 200Hz (default)
-                # Skip resampling if skip_resample=True
+                # Optional resampling to target sampling rate
+                # Input (process2): 4 channels, ~2048 samples at 256 Hz (8 s)
+                target_len = int(self.sample_length * self.sampling_rate)
                 if not self.skip_resample and self.sampling_rate != self.default_rate:
-                    X = resample(X, 10 * self.sampling_rate, axis=-1)
+                    X = resample(X, target_len, axis=-1)
 
                 # Normalize by 95th percentile per channel
                 X = X / (np.quantile(np.abs(X), q=0.95, method="linear", axis=-1, keepdims=True) + 1e-8)
@@ -134,7 +137,7 @@ class CHBMITDataset(torch.utils.data.Dataset):
                     return torch.zeros(16, 10 * self.sampling_rate), 0
 
         # Fallback (should never reach here)
-        return torch.zeros(16, 10 * self.sampling_rate), 0
+        return torch.zeros(4, int(self.sample_length * self.sampling_rate)), 0
 
 
 def prepare_chbmit_dataloaders(config,):
@@ -171,6 +174,31 @@ def prepare_chbmit_dataloaders(config,):
     print(f"  Train (patients {config.data.train_patients[0]}-{config.data.train_patients[1]}): {len(train_files)} files")
     print(f"  Val   (patients {config.data.val_patients[0]}-{config.data.val_patients[1]}): {len(val_files)} files")
     print(f"  Test  (patients {config.data.test_patients[0]}-{config.data.test_patients[1]}): {len(test_files)} files")
+
+    # Apply patient filtering (cross-subject setup)
+    train_files = filter_files_by_patient(
+        train_files,
+        min_patient=config.data.train_patients[0],
+        max_patient=config.data.train_patients[1],
+        exclude_patients=config.data.exclude_patients,
+    )
+    val_files = filter_files_by_patient(
+        val_files,
+        min_patient=config.data.val_patients[0],
+        max_patient=config.data.val_patients[1],
+        exclude_patients=config.data.exclude_patients,
+    )
+    test_files = filter_files_by_patient(
+        test_files,
+        min_patient=config.data.test_patients[0],
+        max_patient=config.data.test_patients[1],
+        exclude_patients=None,  # keep hold-out patient in test set
+    )
+
+    print("\nAfter patient filtering:")
+    print(f"  Train: {len(train_files)} files (excluded: {config.data.exclude_patients})")
+    print(f"  Val:   {len(val_files)} files (excluded: {config.data.exclude_patients})")
+    print(f"  Test:  {len(test_files)} files (hold-out patients {config.data.test_patients[0]}-{config.data.test_patients[1]})")
 
     # Apply data fraction if specified
     if config.data.data_fraction < 1.0:
@@ -222,9 +250,27 @@ def prepare_chbmit_dataloaders(config,):
     # Create datasets
     # Note: skip_resample can be enabled for faster loading (uses native 256Hz instead of 200Hz)
     skip_resample = getattr(config.data, 'skip_resample', False)
-    train_dataset = CHBMITDataset(train_dir, train_files, config.data.sampling_rate, skip_resample=skip_resample)
-    val_dataset = CHBMITDataset(val_dir, val_files, config.data.sampling_rate, skip_resample=skip_resample)
-    test_dataset = CHBMITDataset(test_dir, test_files, config.data.sampling_rate, skip_resample=skip_resample)
+    train_dataset = CHBMITDataset(
+        train_dir,
+        train_files,
+        config.data.sampling_rate,
+        skip_resample=skip_resample,
+        sample_length=config.data.sample_length,
+    )
+    val_dataset = CHBMITDataset(
+        val_dir,
+        val_files,
+        config.data.sampling_rate,
+        skip_resample=skip_resample,
+        sample_length=config.data.sample_length,
+    )
+    test_dataset = CHBMITDataset(
+        test_dir,
+        test_files,
+        config.data.sampling_rate,
+        skip_resample=skip_resample,
+        sample_length=config.data.sample_length,
+    )
 
     # Create dataloaders
     train_loader = torch.utils.data.DataLoader(
